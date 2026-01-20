@@ -1,7 +1,7 @@
 {
     "name": "My Custom Notifier",
     "short_name": "Notifier",
-    "start_url": "/",
+    "start_url": "/webapp-notifs-test/",
     "display": "standalone",
     "background_color": "#ffffff",
     "theme_color": "#000000",
