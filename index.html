@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>My Notifier</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon.png">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+
+<body>
+    <h1>iOS Web Push Test</h1>
+    <button id="sub-btn">Enable Notifications</button>
+
+    <script>
+        const VAPID_PUBLIC_KEY = "BFNqNetG6flHZ8mmTnrt-2S9eVNRFhFi-4ZOPX4aoiYDD8gc50V5YBCNX_FdTjvwxhlZhHqKmtiCglUE1ndiLsk";
+        const WORKER_URL = "https://test-norifications.friedmandaniel111.workers.dev";
+
+        document.getElementById('sub-btn').onclick = async () => {
+            const reg = await navigator.serviceWorker.register('sw.js');
+            const sub = await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: VAPID_PUBLIC_KEY
+            });
+
+            // Save the subscription to your Cloudflare Worker
+            await fetch(`${WORKER_URL}/register`, {
+                method: 'POST',
+                body: JSON.stringify(sub),
+                headers: { 'Content-Type': 'application/json' }
+            });
+            alert("Subscribed! You can now close this and send a webhook.");
+        };
+    </script>
+</body>
+
+</html>
