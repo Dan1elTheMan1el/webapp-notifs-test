@@ -31,6 +31,28 @@
             });
             alert("Subscribed! You can now close this and send a webhook.");
         };
+        // ... existing registration code ...
+
+// 1. Handle "Cold Start" (App opened from notification)
+window.addEventListener('load', () => {
+    const params = new URLSearchParams(window.location.search);
+    const redirectUrl = params.get('redirect');
+    
+    if (redirectUrl) {
+        // Clear the param so refreshing doesn't re-trigger it
+        window.history.replaceState({}, document.title, window.location.pathname);
+        // "Bounce" to the deep link
+        window.location.href = redirectUrl; 
+    }
+});
+
+// 2. Handle "Hot Switch" (App was already running in background)
+navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data && event.data.action === 'navigate') {
+        window.location.href = event.data.url;
+    }
+});
+
     </script>
 </body>
 
