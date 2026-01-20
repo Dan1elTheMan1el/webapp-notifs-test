@@ -12,24 +12,27 @@ self.addEventListener('push', (event) => {
 });
 
 self.addEventListener('notificationclick', (event) => {
-  event.notification.close(); // Close the notification immediately
+  event.notification.close();
 
-  // 1. Get the URL from the payload (or default to root)
-  const urlToOpen = event.notification.data.url || '/';
+  const targetUrl = event.notification.data.url;
 
-  // 2. Open the URL
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // If the app is already open, focus it
+      // 1. If the app is already open, tell it to redirect
       for (const client of clientList) {
-        if (client.url === urlToOpen && 'focus' in client) {
+        if (client.url.includes(self.registration.scope) && 'focus' in client) {
+          client.postMessage({ action: 'navigate', url: targetUrl });
           return client.focus();
         }
       }
-      // Otherwise, open a new window/tab
+
+      // 2. If app is closed, open it with the URL as a "redirect" parameter
+      // IMPORTANT: Adjust the path below if your repo name is different
       if (clients.openWindow) {
-        return clients.openWindow(urlToOpen);
+        const newUrl = self.registration.scope + "?redirect=" + encodeURIComponent(targetUrl);
+        return clients.openWindow(newUrl);
       }
     })
   );
 });
+
