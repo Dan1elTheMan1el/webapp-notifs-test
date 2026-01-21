@@ -1,3 +1,11 @@
+self.addEventListener('install', (event) => {
+    self.skipWaiting(); // Forces new updates to apply immediately
+});
+
+self.addEventListener('activate', (event) => {
+    event.waitUntil(clients.claim());
+});
+
 self.addEventListener('push', (event) => {
     const data = event.data ? event.data.json() : {};
 

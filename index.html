@@ -136,29 +136,36 @@
 
         // ROUTER logic
         function init() {
-            // 1. Check for Redirects (The "Bounce")
             const params = new URLSearchParams(window.location.search);
             const redirectUrl = params.get('redirect');
             const lastData = params.get('last_notification');
 
-            if (redirectUrl) {
-                // If we have a redirect, leave immediately
-                window.location.href = redirectUrl;
-                return;
+            // 1. ALWAYS Render the Dashboard first (if registered)
+            if (savedUUID) {
+                showScreen('view-dashboard');
+                document.getElementById('display-uuid').textContent = savedUUID;
+            } else if (!isStandalone) {
+                showScreen('view-install');
+            } else {
+                showScreen('view-setup');
             }
 
+            // 2. Handle Data/Logs
             if (lastData) {
                 document.getElementById('json-log').textContent = JSON.stringify(JSON.parse(lastData), null, 2);
             }
 
-            // 2. Show correct screen
-            if (!isStandalone) {
-                showScreen('view-install');
-            } else if (!savedUUID) {
-                showScreen('view-setup');
-            } else {
-                showScreen('view-dashboard');
-                document.getElementById('display-uuid').textContent = savedUUID;
+            // 3. Handle Redirects (The "Bouncer")
+            if (redirectUrl) {
+                // Clean the URL immediately so we don't loop on refresh
+                window.history.replaceState({}, document.title, window.location.pathname);
+
+                // Open the link in a "New Window" context
+                // - For Web: Opens in-app browser (Done button at top left), keeps App visible under.
+                // - For Shortcuts: Switches apps, keeps App visible in background.
+                setTimeout(() => {
+                    window.open(redirectUrl, '_blank');
+                }, 100); // Slight delay ensures DOM is painted first
             }
         }
 
@@ -168,21 +175,21 @@
             btn.textContent = "Registering...";
 
             try {
-                // Register Service Worker
                 const reg = await navigator.serviceWorker.register(SW_PATH, { scope: SCOPE });
-                console.log("SW Registered");
 
-                // Request Notification Permission
+                // Force update if a new SW is waiting
+                if (reg.waiting) {
+                    reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                }
+
                 const permission = await Notification.requestPermission();
                 if (permission !== 'granted') throw new Error("Permission denied");
 
-                // Subscribe to Apple/Push Service
                 const sub = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey: VAPID_PUBLIC_KEY
                 });
 
-                // Send to Cloudflare to get UUID
                 const response = await fetch(`${WORKER_URL}/register`, {
                     method: 'POST',
                     body: JSON.stringify(sub),
@@ -192,8 +199,6 @@
                 if (!response.ok) throw new Error("Backend error");
 
                 const data = await response.json();
-
-                // Save UUID and Reload
                 localStorage.setItem('device_uuid', data.uuid);
                 window.location.reload();
 
@@ -208,23 +213,21 @@
             if (event.data && event.data.type === 'NOTIFICATION_CLICK') {
                 const payload = event.data.payload;
 
-                // If the notification has a URL, handle the redirect inside the app
-                if (payload.url) {
-                    window.location.href = payload.url;
-                }
-
                 // Log the data
                 document.getElementById('json-log').textContent = JSON.stringify(payload, null, 2);
+
+                // Handle Redirect
+                if (payload.url) {
+                    window.open(payload.url, '_blank');
+                }
             }
         });
 
-        // Helper
         function showScreen(id) {
             document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
             document.getElementById(id).classList.add('active');
         }
 
-        // Run
         init();
     </script>
 </body>
