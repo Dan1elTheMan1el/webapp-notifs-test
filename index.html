@@ -134,13 +134,12 @@
         const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
         const savedUUID = localStorage.getItem('device_uuid');
 
-        // ROUTER logic
         function init() {
             const params = new URLSearchParams(window.location.search);
             const redirectUrl = params.get('redirect');
             const lastData = params.get('last_notification');
 
-            // 1. ALWAYS Render the Dashboard first (if registered)
+            // 1. RENDER DASHBOARD IMMEDIATELY
             if (savedUUID) {
                 showScreen('view-dashboard');
                 document.getElementById('display-uuid').textContent = savedUUID;
@@ -150,37 +149,59 @@
                 showScreen('view-setup');
             }
 
-            // 2. Handle Data/Logs
+            // 2. DISPLAY LOGS
             if (lastData) {
-                document.getElementById('json-log').textContent = JSON.stringify(JSON.parse(lastData), null, 2);
+                try {
+                    const json = JSON.parse(lastData);
+                    document.getElementById('json-log').textContent = JSON.stringify(json, null, 2);
+                } catch (e) { }
             }
 
-            // 3. Handle Redirects (The "Bouncer")
+            // 3. HANDLE REDIRECTS ("THE BOUNCER")
             if (redirectUrl) {
-                // Clean the URL immediately so we don't loop on refresh
+                // Remove the param so refreshing doesn't re-trigger it
                 window.history.replaceState({}, document.title, window.location.pathname);
 
-                // Open the link in a "New Window" context
-                // - For Web: Opens in-app browser (Done button at top left), keeps App visible under.
-                // - For Shortcuts: Switches apps, keeps App visible in background.
+                // Wait for the UI to paint, then trigger the link
                 setTimeout(() => {
-                    window.open(redirectUrl, '_blank');
-                }, 100); // Slight delay ensures DOM is painted first
+                    handleDeepLink(redirectUrl);
+                }, 500);
             }
         }
 
-        // --- SETUP LOGIC ---
+        // --- THE MAGIC LINK HANDLER ---
+        function handleDeepLink(url) {
+            // CASE A: Custom Scheme (Shortcuts, SMS, Tel, Mailto)
+            // We use a hidden iframe so the main PWA window NEVER navigates away.
+            if (url.includes('://') && !url.startsWith('http')) {
+                const iframe = document.createElement('iframe');
+                iframe.style.display = 'none';
+                document.body.appendChild(iframe);
+                iframe.src = url;
+
+                // Clean up the iframe after a few seconds
+                setTimeout(() => iframe.remove(), 3000);
+            }
+            // CASE B: Standard Website (http/https)
+            // We simulate a user click on a <a target="_blank"> to force external Safari
+            else {
+                const a = document.createElement('a');
+                a.setAttribute('href', url);
+                a.setAttribute('target', '_blank');
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click(); // Programmatic click
+                document.body.removeChild(a);
+            }
+        }
+
+        // --- SETUP LOGIC (Unchanged) ---
         document.getElementById('btn-enable').onclick = async () => {
             const btn = document.getElementById('btn-enable');
             btn.textContent = "Registering...";
-
             try {
                 const reg = await navigator.serviceWorker.register(SW_PATH, { scope: SCOPE });
-
-                // Force update if a new SW is waiting
-                if (reg.waiting) {
-                    reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-                }
+                if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
 
                 const permission = await Notification.requestPermission();
                 if (permission !== 'granted') throw new Error("Permission denied");
@@ -197,7 +218,6 @@
                 });
 
                 if (!response.ok) throw new Error("Backend error");
-
                 const data = await response.json();
                 localStorage.setItem('device_uuid', data.uuid);
                 window.location.reload();
@@ -208,17 +228,17 @@
             }
         };
 
-        // --- LISTENER FOR IN-APP NOTIFICATIONS ---
+        // --- LISTENER FOR IN-APP NOTIFICATIONS (Foreground) ---
         navigator.serviceWorker.addEventListener('message', (event) => {
             if (event.data && event.data.type === 'NOTIFICATION_CLICK') {
                 const payload = event.data.payload;
 
-                // Log the data
+                // Update Log
                 document.getElementById('json-log').textContent = JSON.stringify(payload, null, 2);
 
-                // Handle Redirect
+                // Handle URL
                 if (payload.url) {
-                    window.open(payload.url, '_blank');
+                    handleDeepLink(payload.url);
                 }
             }
         });
