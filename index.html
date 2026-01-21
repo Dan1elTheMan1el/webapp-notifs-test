@@ -4,9 +4,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
     <title>Notifier</title>
+    <meta name="apple-mobile-web-app-title" content="Notifier">
+    <link rel="apple-touch-icon" id="icon-link" href="icon.png">
+
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
     <style>
         body {
@@ -22,12 +27,9 @@
             display: none;
         }
 
-        /* Hide all screens by default */
         .active {
             display: block;
         }
-
-        /* Show only the active screen */
 
         .card {
             background: white;
@@ -45,6 +47,19 @@
         p {
             color: #8e8e93;
             line-height: 1.5;
+            margin: 5px 0;
+        }
+
+        input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px;
+            margin-top: 10px;
+            border: 1px solid #d1d1d6;
+            border-radius: 10px;
+            font-size: 16px;
+            background: #f2f2f7;
+            -webkit-appearance: none;
         }
 
         button {
@@ -57,6 +72,7 @@
             border-radius: 12px;
             width: 100%;
             cursor: pointer;
+            margin-top: 15px;
         }
 
         button:active {
@@ -66,11 +82,12 @@
         .uuid-box {
             font-family: monospace;
             background: #e5e5ea;
-            padding: 10px;
+            padding: 12px;
             border-radius: 8px;
-            letter-spacing: 1px;
-            font-size: 18px;
+            letter-spacing: 0.5px;
+            font-size: 16px;
             user-select: all;
+            word-break: break-all;
         }
 
         .json-dump {
@@ -80,9 +97,20 @@
             padding: 15px;
             border-radius: 10px;
             font-family: monospace;
-            font-size: 12px;
+            font-size: 11px;
             overflow-x: auto;
             white-space: pre-wrap;
+        }
+
+        /* Icon Preview */
+        #icon-preview {
+            width: 60px;
+            height: 60px;
+            border-radius: 13px;
+            margin-top: 15px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+            object-fit: cover;
+            background: #eee;
         }
     </style>
 </head>
@@ -91,19 +119,26 @@
 
     <div id="view-install" class="screen">
         <div class="card">
-            <h1>Install App</h1>
-            <p>To receive notifications, you must add this app to your home screen.</p>
-            <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-            <p style="font-weight: bold;">1. Tap the Share button <span style="font-size: 20px">⎋</span></p>
-            <p style="font-weight: bold;">2. Select "Add to Home Screen"</p>
+            <h1>Customize App</h1>
+            <p>Set a custom name and icon URL before adding to your home screen.</p>
+
+            <input type="text" id="custom-name" placeholder="App Name (e.g. My Home)">
+            <input type="url" id="custom-icon" placeholder="Icon Image URL (https://...)">
+
+            <img id="icon-preview" src="icon.png" alt="Icon Preview">
+
+            <hr style="border: 0; border-top: 1px solid #e5e5ea; margin: 25px 0;">
+
+            <h1>Install</h1>
+            <p>1. Tap Share <span style="font-size: 20px; font-weight: bold; color: #007aff;">⎋</span></p>
+            <p>2. Select <strong>"Add to Home Screen"</strong></p>
         </div>
     </div>
 
     <div id="view-setup" class="screen">
         <div class="card">
             <h1>Setup Notifier</h1>
-            <p>Enable push notifications to generate your unique device ID.</p>
-            <br>
+            <p>Enable notifications to register this device.</p>
             <button id="btn-enable">Enable Notifications</button>
         </div>
     </div>
@@ -111,45 +146,40 @@
     <div id="view-dashboard" class="screen">
         <div class="card">
             <h1>Device Ready</h1>
-            <p>Your Device UUID:</p>
+            <p>Your Webhook ID:</p>
             <div class="uuid-box" id="display-uuid">...</div>
-            <p style="font-size: 12px; margin-top: 10px;">Use this ID in your webhook URL.</p>
         </div>
-
         <div class="card">
             <h3>Last Notification</h3>
-            <div id="json-log" class="json-dump">// No data received yet...</div>
+            <div id="json-log" class="json-dump">// Waiting for data...</div>
         </div>
     </div>
 
     <script>
-        // CONFIG
+        // --- CONFIG ---
         const VAPID_PUBLIC_KEY = "BFNqNetG6flHZ8mmTnrt-2S9eVNRFhFi-4ZOPX4aoiYDD8gc50V5YBCNX_FdTjvwxhlZhHqKmtiCglUE1ndiLsk";
         const WORKER_URL = "https://test-norifications.friedmandaniel111.workers.dev";
-        // IMPORTANT: Add repository path if not at root (e.g., "/my-repo-name/sw.js")
         const SW_PATH = "sw.js";
         const SCOPE = "./";
 
-        // STATE
+        // --- STATE ---
         const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
         const savedUUID = localStorage.getItem('device_uuid');
 
         function init() {
-            // 1. Check for immediate redirect ("The Bounce")
+            // 1. Handle Immediate Redirects (The Bounce)
             const params = new URLSearchParams(window.location.search);
             const redirectUrl = params.get('redirect');
 
             if (redirectUrl) {
-                // Clear history so we don't loop on refresh
+                // Wipe history to prevent loops
                 window.history.replaceState({}, document.title, window.location.pathname);
-
-                // EXECUTE REDIRECT IMMEDIATELY
-                // This causes the "Blank Screen" for shortcuts, which is expected.
+                // Execute Redirect (Will cause white screen for Shortcuts, which is expected)
                 window.location.href = redirectUrl;
                 return;
             }
 
-            // 2. Load Dashboard Logic
+            // 2. Load Dashboard Logs
             const lastData = params.get('last_notification');
             if (lastData) {
                 try {
@@ -157,9 +187,10 @@
                 } catch (e) { }
             }
 
-            // 3. Show correct screen
+            // 3. Routing
             if (!isStandalone) {
                 showScreen('view-install');
+                initCustomizer();
             } else if (!savedUUID) {
                 showScreen('view-setup');
             } else {
@@ -168,7 +199,51 @@
             }
         }
 
-        // --- SETUP LOGIC ---
+        // --- CUSTOMIZER LOGIC (iOS Only) ---
+        function initCustomizer() {
+            const nameInput = document.getElementById('custom-name');
+            const iconInput = document.getElementById('custom-icon');
+            const preview = document.getElementById('icon-preview');
+            const iconLink = document.getElementById('icon-link');
+            const titleTag = document.querySelector('title');
+            const metaTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+
+            // Load saved preferences
+            const savedName = localStorage.getItem('custom_app_name');
+            const savedIcon = localStorage.getItem('custom_app_icon');
+
+            if (savedName) { nameInput.value = savedName; updateName(savedName); }
+            if (savedIcon) { iconInput.value = savedIcon; updateIcon(savedIcon); }
+
+            // Listeners
+            nameInput.addEventListener('input', (e) => {
+                const val = e.target.value;
+                localStorage.setItem('custom_app_name', val);
+                updateName(val);
+            });
+
+            iconInput.addEventListener('input', (e) => {
+                const val = e.target.value;
+                localStorage.setItem('custom_app_icon', val);
+                updateIcon(val);
+            });
+
+            function updateName(name) {
+                if (!name) return;
+                // iOS reads these two tags for the Home Screen Name
+                titleTag.innerText = name;
+                metaTitle.setAttribute("content", name);
+            }
+
+            function updateIcon(url) {
+                if (!url) return;
+                // iOS reads this tag for the Home Screen Icon
+                preview.src = url;
+                iconLink.href = url;
+            }
+        }
+
+        // --- REGISTRATION LOGIC ---
         document.getElementById('btn-enable').onclick = async () => {
             const btn = document.getElementById('btn-enable');
             btn.textContent = "Processing...";
@@ -177,7 +252,7 @@
                 if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
 
                 const permission = await Notification.requestPermission();
-                if (permission !== 'granted') throw new Error("Denied");
+                if (permission !== 'granted') throw new Error("Permission Denied");
 
                 const sub = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
@@ -190,7 +265,7 @@
                     headers: { 'Content-Type': 'application/json' }
                 });
 
-                if (!response.ok) throw new Error("Error");
+                if (!response.ok) throw new Error("Server Error");
 
                 const data = await response.json();
                 localStorage.setItem('device_uuid', data.uuid);
@@ -201,18 +276,12 @@
             }
         };
 
-        // --- LISTENER (For when app is already open) ---
+        // --- IN-APP MESSAGE LISTENER ---
         navigator.serviceWorker.addEventListener('message', (event) => {
             if (event.data && event.data.type === 'NOTIFICATION_CLICK') {
                 const payload = event.data.payload;
-
-                // Log data
                 document.getElementById('json-log').textContent = JSON.stringify(payload, null, 2);
-
-                // Immediate Redirect
-                if (payload.url) {
-                    window.location.href = payload.url;
-                }
+                if (payload.url) window.location.href = payload.url;
             }
         });
 
