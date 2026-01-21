@@ -135,76 +135,49 @@
         const savedUUID = localStorage.getItem('device_uuid');
 
         function init() {
+            // 1. Check for immediate redirect ("The Bounce")
             const params = new URLSearchParams(window.location.search);
             const redirectUrl = params.get('redirect');
-            const lastData = params.get('last_notification');
 
-            // 1. RENDER DASHBOARD IMMEDIATELY
-            if (savedUUID) {
-                showScreen('view-dashboard');
-                document.getElementById('display-uuid').textContent = savedUUID;
-            } else if (!isStandalone) {
-                showScreen('view-install');
-            } else {
-                showScreen('view-setup');
+            if (redirectUrl) {
+                // Clear history so we don't loop on refresh
+                window.history.replaceState({}, document.title, window.location.pathname);
+
+                // EXECUTE REDIRECT IMMEDIATELY
+                // This causes the "Blank Screen" for shortcuts, which is expected.
+                window.location.href = redirectUrl;
+                return;
             }
 
-            // 2. DISPLAY LOGS
+            // 2. Load Dashboard Logic
+            const lastData = params.get('last_notification');
             if (lastData) {
                 try {
-                    const json = JSON.parse(lastData);
-                    document.getElementById('json-log').textContent = JSON.stringify(json, null, 2);
+                    document.getElementById('json-log').textContent = JSON.stringify(JSON.parse(lastData), null, 2);
                 } catch (e) { }
             }
 
-            // 3. HANDLE REDIRECTS ("THE BOUNCER")
-            if (redirectUrl) {
-                // Remove the param so refreshing doesn't re-trigger it
-                window.history.replaceState({}, document.title, window.location.pathname);
-
-                // Wait for the UI to paint, then trigger the link
-                setTimeout(() => {
-                    handleDeepLink(redirectUrl);
-                }, 500);
+            // 3. Show correct screen
+            if (!isStandalone) {
+                showScreen('view-install');
+            } else if (!savedUUID) {
+                showScreen('view-setup');
+            } else {
+                showScreen('view-dashboard');
+                document.getElementById('display-uuid').textContent = savedUUID;
             }
         }
 
-        // --- THE MAGIC LINK HANDLER ---
-        function handleDeepLink(url) {
-            // CASE A: Custom Scheme (Shortcuts, SMS, Tel, Mailto)
-            // We use a hidden iframe so the main PWA window NEVER navigates away.
-            if (url.includes('://') && !url.startsWith('http')) {
-                const iframe = document.createElement('iframe');
-                iframe.style.display = 'none';
-                document.body.appendChild(iframe);
-                iframe.src = url;
-
-                // Clean up the iframe after a few seconds
-                setTimeout(() => iframe.remove(), 3000);
-            }
-            // CASE B: Standard Website (http/https)
-            // We simulate a user click on a <a target="_blank"> to force external Safari
-            else {
-                const a = document.createElement('a');
-                a.setAttribute('href', url);
-                a.setAttribute('target', '_blank');
-                a.style.display = 'none';
-                document.body.appendChild(a);
-                a.click(); // Programmatic click
-                document.body.removeChild(a);
-            }
-        }
-
-        // --- SETUP LOGIC (Unchanged) ---
+        // --- SETUP LOGIC ---
         document.getElementById('btn-enable').onclick = async () => {
             const btn = document.getElementById('btn-enable');
-            btn.textContent = "Registering...";
+            btn.textContent = "Processing...";
             try {
                 const reg = await navigator.serviceWorker.register(SW_PATH, { scope: SCOPE });
                 if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
 
                 const permission = await Notification.requestPermission();
-                if (permission !== 'granted') throw new Error("Permission denied");
+                if (permission !== 'granted') throw new Error("Denied");
 
                 const sub = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
@@ -217,28 +190,28 @@
                     headers: { 'Content-Type': 'application/json' }
                 });
 
-                if (!response.ok) throw new Error("Backend error");
+                if (!response.ok) throw new Error("Error");
+
                 const data = await response.json();
                 localStorage.setItem('device_uuid', data.uuid);
                 window.location.reload();
-
             } catch (err) {
-                alert("Error: " + err.message);
-                btn.textContent = "Try Again";
+                alert(err.message);
+                btn.textContent = "Retry";
             }
         };
 
-        // --- LISTENER FOR IN-APP NOTIFICATIONS (Foreground) ---
+        // --- LISTENER (For when app is already open) ---
         navigator.serviceWorker.addEventListener('message', (event) => {
             if (event.data && event.data.type === 'NOTIFICATION_CLICK') {
                 const payload = event.data.payload;
 
-                // Update Log
+                // Log data
                 document.getElementById('json-log').textContent = JSON.stringify(payload, null, 2);
 
-                // Handle URL
+                // Immediate Redirect
                 if (payload.url) {
-                    handleDeepLink(payload.url);
+                    window.location.href = payload.url;
                 }
             }
         });
