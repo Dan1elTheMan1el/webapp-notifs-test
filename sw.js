@@ -1,38 +1,46 @@
 self.addEventListener('push', (event) => {
-  const data = event.data ? event.data.json() : {};
-  
-  event.waitUntil(
-    self.registration.showNotification(data.title || 'New Notification', {
-      body: data.body || '',
-      icon: '/icon.png',
-      // CRITICAL: We pass the entire data object here so 'notificationclick' can read it
-      data: data 
-    })
-  );
+    const data = event.data ? event.data.json() : {};
+
+    event.waitUntil(
+        self.registration.showNotification(data.title || 'New Notification', {
+            body: data.body || '',
+            icon: '/icon.png', // Ensure this path matches your repo structure
+            data: data
+        })
+    );
 });
 
 self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
+    event.notification.close();
+    const payload = event.notification.data;
 
-  const targetUrl = event.notification.data.url;
+    // 1. Determine if we need to redirect or just open the app
+    // If 'url' is present in payload, we redirect. Otherwise just open dashboard.
+    const targetUrl = payload.url;
 
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // 1. If the app is already open, tell it to redirect
-      for (const client of clientList) {
-        if (client.url.includes(self.registration.scope) && 'focus' in client) {
-          client.postMessage({ action: 'navigate', url: targetUrl });
-          return client.focus();
-        }
-      }
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+            // Check if app is already open
+            for (const client of clientList) {
+                if (client.url.includes(self.registration.scope) && 'focus' in client) {
+                    // Send the data to the open window to display it
+                    client.postMessage({ type: 'NOTIFICATION_CLICK', payload: payload });
+                    return client.focus();
+                }
+            }
 
-      // 2. If app is closed, open it with the URL as a "redirect" parameter
-      // IMPORTANT: Adjust the path below if your repo name is different
-      if (clients.openWindow) {
-        const newUrl = self.registration.scope + "?redirect=" + encodeURIComponent(targetUrl);
-        return clients.openWindow(newUrl);
-      }
-    })
-  );
+            // If app is closed, open it. 
+            // We pass the data as a query param so the page can read it on load.
+            if (clients.openWindow) {
+                const baseUrl = self.registration.scope;
+                // If there is a redirect URL, append it
+                if (targetUrl) {
+                    return clients.openWindow(`${baseUrl}?redirect=${encodeURIComponent(targetUrl)}`);
+                }
+                // Otherwise just append the data for display
+                const dataStr = encodeURIComponent(JSON.stringify(payload));
+                return clients.openWindow(`${baseUrl}?last_notification=${dataStr}`);
+            }
+        })
+    );
 });
-

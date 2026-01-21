@@ -1,58 +1,231 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
-    <title>My Notifier</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Notifier</title>
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="icon.png">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <style>
+        body {
+            font-family: -apple-system, system-ui, sans-serif;
+            background: #f2f2f7;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+            color: #1c1c1e;
+        }
+
+        .screen {
+            display: none;
+        }
+
+        /* Hide all screens by default */
+        .active {
+            display: block;
+        }
+
+        /* Show only the active screen */
+
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 16px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        p {
+            color: #8e8e93;
+            line-height: 1.5;
+        }
+
+        button {
+            background: #007aff;
+            color: white;
+            border: none;
+            font-size: 17px;
+            font-weight: 600;
+            padding: 14px 24px;
+            border-radius: 12px;
+            width: 100%;
+            cursor: pointer;
+        }
+
+        button:active {
+            opacity: 0.8;
+        }
+
+        .uuid-box {
+            font-family: monospace;
+            background: #e5e5ea;
+            padding: 10px;
+            border-radius: 8px;
+            letter-spacing: 1px;
+            font-size: 18px;
+            user-select: all;
+        }
+
+        .json-dump {
+            text-align: left;
+            background: #1c1c1e;
+            color: #30d158;
+            padding: 15px;
+            border-radius: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+    </style>
 </head>
 
 <body>
-    <h1>iOS Web Push Test</h1>
-    <button id="sub-btn">Enable Notifications</button>
+
+    <div id="view-install" class="screen">
+        <div class="card">
+            <h1>Install App</h1>
+            <p>To receive notifications, you must add this app to your home screen.</p>
+            <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+            <p style="font-weight: bold;">1. Tap the Share button <span style="font-size: 20px">⎋</span></p>
+            <p style="font-weight: bold;">2. Select "Add to Home Screen"</p>
+        </div>
+    </div>
+
+    <div id="view-setup" class="screen">
+        <div class="card">
+            <h1>Setup Notifier</h1>
+            <p>Enable push notifications to generate your unique device ID.</p>
+            <br>
+            <button id="btn-enable">Enable Notifications</button>
+        </div>
+    </div>
+
+    <div id="view-dashboard" class="screen">
+        <div class="card">
+            <h1>Device Ready</h1>
+            <p>Your Device UUID:</p>
+            <div class="uuid-box" id="display-uuid">...</div>
+            <p style="font-size: 12px; margin-top: 10px;">Use this ID in your webhook URL.</p>
+        </div>
+
+        <div class="card">
+            <h3>Last Notification</h3>
+            <div id="json-log" class="json-dump">// No data received yet...</div>
+        </div>
+    </div>
 
     <script>
+        // CONFIG
         const VAPID_PUBLIC_KEY = "BFNqNetG6flHZ8mmTnrt-2S9eVNRFhFi-4ZOPX4aoiYDD8gc50V5YBCNX_FdTjvwxhlZhHqKmtiCglUE1ndiLsk";
         const WORKER_URL = "https://test-norifications.friedmandaniel111.workers.dev";
+        // IMPORTANT: Add repository path if not at root (e.g., "/my-repo-name/sw.js")
+        const SW_PATH = "sw.js";
+        const SCOPE = "./";
 
-        document.getElementById('sub-btn').onclick = async () => {
-            const reg = await navigator.serviceWorker.register('sw.js');
-            const sub = await reg.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: VAPID_PUBLIC_KEY
-            });
+        // STATE
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+        const savedUUID = localStorage.getItem('device_uuid');
 
-            // Save the subscription to your Cloudflare Worker
-            await fetch(`${WORKER_URL}/register`, {
-                method: 'POST',
-                body: JSON.stringify(sub),
-                headers: { 'Content-Type': 'application/json' }
-            });
-            alert("Subscribed! You can now close this and send a webhook.");
+        // ROUTER logic
+        function init() {
+            // 1. Check for Redirects (The "Bounce")
+            const params = new URLSearchParams(window.location.search);
+            const redirectUrl = params.get('redirect');
+            const lastData = params.get('last_notification');
+
+            if (redirectUrl) {
+                // If we have a redirect, leave immediately
+                window.location.href = redirectUrl;
+                return;
+            }
+
+            if (lastData) {
+                document.getElementById('json-log').textContent = JSON.stringify(JSON.parse(lastData), null, 2);
+            }
+
+            // 2. Show correct screen
+            if (!isStandalone) {
+                showScreen('view-install');
+            } else if (!savedUUID) {
+                showScreen('view-setup');
+            } else {
+                showScreen('view-dashboard');
+                document.getElementById('display-uuid').textContent = savedUUID;
+            }
+        }
+
+        // --- SETUP LOGIC ---
+        document.getElementById('btn-enable').onclick = async () => {
+            const btn = document.getElementById('btn-enable');
+            btn.textContent = "Registering...";
+
+            try {
+                // Register Service Worker
+                const reg = await navigator.serviceWorker.register(SW_PATH, { scope: SCOPE });
+                console.log("SW Registered");
+
+                // Request Notification Permission
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') throw new Error("Permission denied");
+
+                // Subscribe to Apple/Push Service
+                const sub = await reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: VAPID_PUBLIC_KEY
+                });
+
+                // Send to Cloudflare to get UUID
+                const response = await fetch(`${WORKER_URL}/register`, {
+                    method: 'POST',
+                    body: JSON.stringify(sub),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (!response.ok) throw new Error("Backend error");
+
+                const data = await response.json();
+
+                // Save UUID and Reload
+                localStorage.setItem('device_uuid', data.uuid);
+                window.location.reload();
+
+            } catch (err) {
+                alert("Error: " + err.message);
+                btn.textContent = "Try Again";
+            }
         };
-        // ... existing registration code ...
 
-// 1. Handle "Cold Start" (App opened from notification)
-window.addEventListener('load', () => {
-    const params = new URLSearchParams(window.location.search);
-    const redirectUrl = params.get('redirect');
-    
-    if (redirectUrl) {
-        // Clear the param so refreshing doesn't re-trigger it
-        window.history.replaceState({}, document.title, window.location.pathname);
-        // "Bounce" to the deep link
-        window.location.href = redirectUrl; 
-    }
-});
+        // --- LISTENER FOR IN-APP NOTIFICATIONS ---
+        navigator.serviceWorker.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'NOTIFICATION_CLICK') {
+                const payload = event.data.payload;
 
-// 2. Handle "Hot Switch" (App was already running in background)
-navigator.serviceWorker.addEventListener('message', (event) => {
-    if (event.data && event.data.action === 'navigate') {
-        window.location.href = event.data.url;
-    }
-});
+                // If the notification has a URL, handle the redirect inside the app
+                if (payload.url) {
+                    window.location.href = payload.url;
+                }
 
+                // Log the data
+                document.getElementById('json-log').textContent = JSON.stringify(payload, null, 2);
+            }
+        });
+
+        // Helper
+        function showScreen(id) {
+            document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+        }
+
+        // Run
+        init();
     </script>
 </body>
 
